@@ -1,4 +1,5 @@
 import pdfplumber
+import pandas as pd
 
 
 def extract_text_from_pdf(file_path: str) -> str:
@@ -12,11 +13,48 @@ def extract_text_from_pdf(file_path: str) -> str:
     return "\n".join(text_parts)
 
 
+def extract_text_from_csv_excel(file_path: str) -> str:
+    """
+    Извлекает текст из CSV или Excel для последующего парсинга регулярками.
+
+    CSV — читаем как сырой текст: CSV и так является текстовым форматом,
+    все значения включая "№ 1349/1277" и "от 23.07.2025" уже есть в файле
+    как есть. Гонять через pandas нет смысла — он структурирует данные,
+    а нам нужна просто строка.
+
+    Excel — pandas читает все листы и склеивает значения ячеек в текст,
+    потому что xlsx бинарный и как сырой текст не читается.
+    """
+    lower = file_path.lower()
+
+    if lower.endswith(".csv"):
+        for encoding in ("utf-8-sig", "utf-8", "cp1251"):
+            try:
+                with open(file_path, encoding=encoding) as f:
+                    return f.read()
+            except UnicodeDecodeError:
+                continue
+        raise ValueError(f"Не удалось прочитать CSV: {file_path}")
+
+    elif lower.endswith((".xlsx", ".xls")):
+        # Читаем все листы, склеиваем все ненулевые ячейки через пробел
+        all_sheets = pd.read_excel(file_path, sheet_name=None, dtype=str)
+        parts = []
+        for df in all_sheets.values():
+            parts.append(
+                " ".join(
+                    str(val)
+                    for val in df.values.flatten()
+                    if pd.notna(val) and str(val).strip()
+                )
+            )
+        return " ".join(parts)
+
+    else:
+        raise ValueError(f"Неподдерживаемый формат: {file_path}")
+
+
 def extract_words_with_coords(file_path: str) -> list:
-    """
-    Возвращает список всех слов с координатами и номером страницы.
-    Каждый элемент: {text, x0, y0, x1, y1, page, page_height}
-    """
     result = []
     with pdfplumber.open(file_path) as pdf:
         for page_num, page in enumerate(pdf.pages):

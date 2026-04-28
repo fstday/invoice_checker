@@ -4,167 +4,238 @@
     <meta charset="UTF-8">
     <title>Проверка счёт-фактуры</title>
     <style>
+        * { box-sizing: border-box; }
+
         body {
             font-family: Arial, sans-serif;
-            max-width: 600px;
-            margin: 60px auto;
+            max-width: 860px;
+            margin: 40px auto;
             padding: 0 20px;
-            background: #f5f5f5;
+            background: #f0f2f5;
         }
-        h1 { color: #333; }
-        input, button {
+
+        h1 { color: #333; margin-bottom: 24px; }
+
+        .form-card {
+            background: white;
+            border-radius: 10px;
+            padding: 24px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+            margin-bottom: 24px;
+        }
+
+        input[type="file"],
+        input[type="text"] {
             display: block;
             width: 100%;
-            padding: 10px;
-            margin: 10px 0;
-            font-size: 16px;
-            box-sizing: border-box;
+            padding: 10px 12px;
+            margin: 8px 0;
+            font-size: 15px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
         }
+
         button {
-            background: #4CAF50;
+            display: block;
+            width: 100%;
+            padding: 12px;
+            margin: 10px 0 0;
+            font-size: 15px;
             color: white;
             border: none;
             cursor: pointer;
-            border-radius: 4px;
+            border-radius: 6px;
+            background: #4CAF50;
         }
-        button:hover { background: #45a049; }
-        #result {
-            margin-top: 20px;
-            padding: 20px;
+        button:hover { opacity: 0.9; }
+
+        #loading { display: none; color: #888; margin: 12px 0 0; }
+
+        /* Карточка результата */
+        .result-card {
             background: white;
-            border-radius: 8px;
-            display: none;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 16px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.08);
         }
-        .matched    { border-left: 5px solid #4CAF50; }
-        .not_matched { border-left: 5px solid #f44336; }
-        .partial_match { border-left: 5px solid #ff9800; }
-        .not_found  { border-left: 5px solid #9e9e9e; }
-        .error      { border-left: 5px solid #9c27b0; }
-        .field { margin: 8px 0; }
+        .result-card.matched      { border-left: 5px solid #4CAF50; }
+        .result-card.partial_match{ border-left: 5px solid #ff9800; }
+        .result-card.not_matched  { border-left: 5px solid #f44336; }
+        .result-card.not_found    { border-left: 5px solid #9e9e9e; }
+        .result-card.error        { border-left: 5px solid #9c27b0; }
+
+        .result-header { font-size: 18px; font-weight: bold; margin-bottom: 12px; }
+
+        .field { margin: 6px 0; font-size: 14px; color: #333; }
         .label { font-weight: bold; color: #555; }
-        .ok   { color: #4CAF50; }
-        .fail { color: #f44336; }
+        .ok    { color: #4CAF50; font-weight: bold; }
+        .fail  { color: #f44336; font-weight: bold; }
+
+        /* PDF превью */
+        .pdf-section {
+            margin-top: 16px;
+            border-top: 1px solid #eee;
+            padding-top: 14px;
+        }
+        .pdf-section h4 { margin: 0 0 10px; font-size: 14px; color: #555; }
+
+        .pdf-actions {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .pdf-actions a {
+            display: inline-block;
+            padding: 8px 16px;
+            background: #2196F3;
+            color: white;
+            border-radius: 5px;
+            text-decoration: none;
+            font-size: 13px;
+        }
+        .pdf-actions button {
+            width: auto;
+            padding: 8px 16px;
+            background: #607d8b;
+            font-size: 13px;
+            margin: 0;
+        }
+
+        /* Встроенный PDF */
+        .pdf-embed {
+            display: none;
+            width: 100%;
+            height: 500px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            margin-top: 8px;
+        }
     </style>
 </head>
 <body>
+
 <h1>🧾 Проверка счёт-фактуры</h1>
 
-<input type="file" id="fileInput" accept=".pdf" multiple>
-<input type="text" id="number" placeholder="Ожидаемый номер (например 1349/1277)">
-<input type="text" id="date"   placeholder="Ожидаемая дата (например 23.07.2025)">
-<button onclick="checkInvoice()">Проверить</button>
-<!--<button onclick="checkAndHighlight()" style="background:#2196F3;">🔍 Проверить + подсветить PDF</button>-->
+<div class="form-card">
+    <input type="file" id="fileInput" accept=".pdf,.csv,.xlsx,.xls" multiple>
+    <input type="text" id="number" placeholder="Ожидаемый номер (например 1349/1277)">
+    <input type="text" id="date"   placeholder="Ожидаемая дата (например 23.07.2025)">
+    <button onclick="checkInvoice()">✅ Проверить</button>
+    <p id="loading">⏳ Обрабатываем файл(ы)...</p>
+</div>
 
-<div id="result"></div>
+<div id="results"></div>
 
 <script>
+    const statusLabels = {
+        matched:       '✅ Совпадает',
+        partial_match: '⚠️ Частичное совпадение',
+        not_matched:   '❌ Не совпадает',
+        not_found:     '🔍 Не найдено',
+        error:         '💥 Ошибка'
+    };
+
     async function checkInvoice() {
-        const files = document.getElementById('fileInput').files;
-        const number = document.getElementById('number').value;
-        const date = document.getElementById('date').value;
+        const files  = document.getElementById('fileInput').files;
+        const number = document.getElementById('number').value.trim();
+        const date   = document.getElementById('date').value.trim();
 
         if (!files.length || !number || !date) {
             alert('Заполните все поля!');
             return;
         }
 
+        setLoading(true);
+        document.getElementById('results').innerHTML = '';
+
         const formData = new FormData();
-        if (files.length === 1) {
+        const isBatch  = files.length > 1;
+
+        if (isBatch) {
+            for (const file of files) formData.append('files', file);
+        } else {
             formData.append('file', files[0]);
-        } else {
-            for (const file of files) {
-                formData.append('files', file);
-            }
         }
-
         formData.append('expected_number', number);
-        formData.append('expected_date', date);
+        formData.append('expected_date',   date);
 
-        const url = files.length > 1
-            ? 'http://127.0.0.1:8000/check-batch'
-            : 'http://127.0.0.1:8000/check';
+        try {
+            const response = await fetch(isBatch ? '/check-batch' : '/check', {
+                method: 'POST',
+                body: formData
+            });
 
-        const response = await fetch(url, {
-            method: 'POST',
-            body: formData
-        });
+            if (!response.ok) throw new Error(`Ошибка сервера: ${response.status}`);
 
-        const data = await response.json();
-
-        const results = data.results ?? [data];
-        showResults(results);
-    }
-
-    async function checkAndHighlight() {
-        const files = document.getElementById('fileInput').files;
-        const number = document.getElementById('number').value;
-        const date = document.getElementById('date').value;
-
-        if (!files.length || !number || !date) {
-            alert('Заполните все поля!');
-            return;
-        }
-
-        const formData = new FormData();
-        formData.append('file', files[0]);
-        formData.append('expected_number', number);
-        formData.append('expected_date', date);
-
-        const response = await fetch('http://127.0.0.1:8000/check-and-highlight', {
-            method: 'POST',
-            body: formData
-        });
-
-        if (response.ok) {
-            const blob = await response.blob();
-            const url = URL.createObjectURL(blob);
-
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'highlighted_invoice.pdf';
-            a.click();
-
-            URL.revokeObjectURL(url);
-
-            const div = document.getElementById('result');
-            div.style.display = 'block';
-            div.innerHTML = '<p style="color:green; padding:10px;">✅ PDF скачан — номер и дата подсвечены!</p>';
-        } else {
-            alert('Ошибка при обработке файла');
+            const data    = await response.json();
+            const results = data.results ?? [data];
+            showResults(results);
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        } finally {
+            setLoading(false);
         }
     }
 
     function showResults(results) {
-        const div = document.getElementById('result');
-        div.style.display = 'block';
-        div.className = '';
+        const container = document.getElementById('results');
 
-        const statusLabels = {
-            matched:       '✅ Совпадает',
-            partial_match: '⚠️ Частичное совпадение',
-            not_matched:   '❌ Не совпадает',
-            not_found:     '🔍 Не найдено',
-            error:         '💥 Ошибка'
-        };
+        container.innerHTML = results.map((data, i) => `
+            <div class="result-card ${data.status}">
 
-        div.innerHTML = results.map(data => `
-        <div class="${data.status}" style="margin-bottom:16px; padding:16px; background:white; border-radius:8px;">
-            <h3>${statusLabels[data.status]}</h3>
-            <div class="field"><span class="label">Файл:</span> ${data.file_name}</div>
-            <div class="field">
-                <span class="label">Номер:</span>
-                ожидался <b>${data.expected_number}</b>,
-                найден <b>${data.found_number}</b>
-                <span class="${data.number_match ? 'ok' : 'fail'}">${data.number_match ? '✓' : '✗'}</span>
+                <div class="result-header">${statusLabels[data.status] ?? data.status}</div>
+
+                <div class="field">
+                    <span class="label">Файл:</span> ${data.file_name}
+                </div>
+                <div class="field">
+                    <span class="label">Номер:</span>
+                    ожидался <b>${data.expected_number}</b>,
+                    найден <b>${data.found_number ?? '—'}</b>
+                    <span class="${data.number_match ? 'ok' : 'fail'}">${data.number_match ? '✓' : '✗'}</span>
+                </div>
+                <div class="field">
+                    <span class="label">Дата:</span>
+                    ожидалась <b>${data.expected_date}</b>,
+                    найдена <b>${data.found_date ?? '—'}</b>
+                    <span class="${data.date_match ? 'ok' : 'fail'}">${data.date_match ? '✓' : '✗'}</span>
+                </div>
+
+                ${data.error ? `
+                <div class="field" style="color:#9c27b0">
+                    <span class="label">Ошибка:</span> ${data.error}
+                </div>` : ''}
+
+                ${data.pdf_url ? `
+                <div class="pdf-section">
+                    <h4>📄 PDF с подсветкой
+                        ${data.number_found_in_pdf ? '<span class="ok">номер найден</span>' : '<span class="fail">номер не найден</span>'}
+                        &nbsp;·&nbsp;
+                        ${data.date_found_in_pdf   ? '<span class="ok">дата найдена</span>'  : '<span class="fail">дата не найдена</span>'}
+                    </h4>
+                    <div class="pdf-actions">
+                        <a href="${data.pdf_url}" download>⬇️ Скачать PDF</a>
+                        <button onclick="togglePdf(${i})">👁 Показать / скрыть</button>
+                    </div>
+                    <iframe
+                        id="pdf-embed-${i}"
+                        class="pdf-embed"
+                        src="${data.pdf_url}">
+                    </iframe>
+                </div>` : ''}
+
             </div>
-            <div class="field">
-                <span class="label">Дата:</span>
-                ожидалась <b>${data.expected_date}</b>,
-                найдена <b>${data.found_date}</b>
-                <span class="${data.date_match ? 'ok' : 'fail'}">${data.date_match ? '✓' : '✗'}</span>
-            </div>
-        </div>
-    `).join('');
+        `).join('');
+    }
+
+    function togglePdf(i) {
+        const el = document.getElementById(`pdf-embed-${i}`);
+        el.style.display = el.style.display === 'block' ? 'none' : 'block';
+    }
+
+    function setLoading(state) {
+        document.getElementById('loading').style.display = state ? 'block' : 'none';
     }
 </script>
 </body>
